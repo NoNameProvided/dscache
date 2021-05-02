@@ -18,8 +18,8 @@
   ],
   "scripts": {
     "build": "tsc --project tsconfig.json",
-    "prettier:check": "prettier --check .",
-    "prettier:format": "prettier --write .",
+    "prettier:check": "prettier --ignore-path .gitignore --check .",
+    "prettier:format": "prettier --ignore-path .gitignore --write .",
     "test": "node tests/suite.js"
   },
   "devDependencies": {
