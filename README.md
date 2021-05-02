@@ -4,7 +4,7 @@
 ![npm](https://img.shields.io/npm/v/dscache)
 [![Dependency Status](https://david-dm.org/NoNameProvided/dscache.svg)](https://david-dm.org/typestack/typedi)
 
-A dead simple LRU style in-memory key-value cache with **eager key eviction**.
+A dead-simple LRU style in-memory key-value cache with **eager key eviction**.
 
 ### Key features
 
@@ -35,7 +35,75 @@ lruCache.get('user-token:231');
 
 ## API
 
-_To be written..._
+#### Creating a cache instance
+
+```ts
+const cacheInstance = new DSCache({ size: 10000 }); 
+```
+
+#### Checking current size of the cache
+
+```ts
+cacheInstance.size;
+```
+
+The `size` property returns the count of currently stored items in the cache.
+
+#### Setting a value
+
+```ts
+cacheInstance.set(key: string; value: any; options?: { ttl?: number }): void;
+```
+
+Setting values can be done via the `set()` methods. The key must be a string
+and value can be anything. Optionally a time to live (`ttl`) option can be
+specified in milliseconds. When TTL is set the item will be auto-removed from
+the cache after the specified duration.
+
+#### Getting a value
+
+There are two ways to get a value from the cache: `get()` and `peak()` methods.
+
+```ts
+cacheInstance.get(key: string): T | undefined;
+```
+
+The `get()` method returns the value saved under the specified key or undefined
+if the key doesn't exist. This method also marks the item as recently used
+preventing it from being removed.
+
+```ts
+cacheInstance.peak(key: string): T | undefined;
+```
+
+The `peak()` method also returns the value saved under the specified key or
+undefined if the key doesn't exist. However, using this method won't mark the
+item as recently used.
+
+#### Checking if a value is cached
+
+```ts
+cacheInstance.has(key: string): boolean;
+```
+
+The `has()` function returns `true` if the specified key exists in the cache or
+`false` otherwise.
+
+#### Deleting a value
+
+```ts
+cacheInstance.delete(key: string): void;
+```
+
+The `delete()` function removes the specified key from the cache.
+
+#### Resting the cache
+
+```ts
+cacheInstance.reset(): void;
+```
+
+The `reset()` function removes all cached items from the cache.
 
 ## License
 
