@@ -38,7 +38,7 @@ lruCache.get('user-token:231');
 #### Creating a cache instance
 
 ```ts
-const cacheInstance = new DSCache({ size: 10000 }); 
+const cacheInstance = new DSCache({ size: 10000 });
 ```
 
 #### Checking current size of the cache
