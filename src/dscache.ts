@@ -17,7 +17,7 @@ export class DSCache<T> {
   /**
    * The internal storage for the cached items.
    */
-  private store = new Map<string, CacheItem<T>>();
+  private store: Map<string, CacheItem<T>> = new Map();
 
   /**
    * A helper array used in calculating which keys to evict. This array is
@@ -27,22 +27,13 @@ export class DSCache<T> {
   private expirationStatistics: { key: string; expireAt: number }[] = [];
 
   /**
-   * A helper array used in calculating which keys to evict. This array is
-   * always ordered in eviction priority so the algorithm can exit as soon as
-   * the stored item count is below the threshold.
-   *
-   * Due to how values are evicted, this array may contain value for removed elements
-   * but they will eventually be removed. When an item is removed because it's TTL
-   * has expired it won't get removed from this array automatically.
-   */
-  private usageStatistics: { key: string; lastAccessed: number }[] = [];
-
-  /**
    * Returns the count of currently cached items.
    */
   get size(): number {
     return this.store.size;
   }
+
+  private mostRecentBag: CacheItem<T> = { key: null as any } as any;
 
   /**
    * Creates a new cache instance.
@@ -65,8 +56,14 @@ export class DSCache<T> {
       throw new Error(`Failed to set value for "${key}" because it's not in ${this.namespace} namespace!`);
     }
 
-    this.store.set(key, valueBag);
-    this.usageStatistics.push({ key, lastAccessed: valueBag.iat });
+    /**
+     * We need to delete and readd for multiple reasons:
+     *  - We need to reset the iteration order via re-adding the element
+     *  - We need to delete via the public API to reset the TTL of the previous item.
+     *
+     * Note: The public delete function calls the `evictItems()` function.
+     */
+    this.delete(key);
 
     if (valueBag.ttl) {
       /**
@@ -78,7 +75,7 @@ export class DSCache<T> {
       this.expirationStatistics.splice(insertBeforePosition, 0, { key, expireAt: valueBag.iat + valueBag.ttl });
     }
 
-    this.evictItems();
+    this.store.set(key, valueBag);
   }
 
   /**
@@ -86,11 +83,31 @@ export class DSCache<T> {
    * If no item exists with the specified key `undefined` is returned.
    */
   get(key: string): T | undefined {
+    /**
+     * If we request the same item as before and no TTL is set for it, aka it
+     * cannot expire then we return it immediately for performance boost.
+     */
+    if (this.mostRecentBag.key === key && !this.mostRecentBag.ttl) {
+      return this.mostRecentBag.value;
+    }
+
     this.evictItems();
 
-    if (this.store.has(key)) {
-      const valueBag = this.store.get(key) as CacheItem<T>;
-      this.usageStatistics.push({ key, lastAccessed: Date.now() });
+    const valueBag = this.store.get(key);
+
+    if (valueBag) {
+      /**
+       * We need to delete and readd for multiple reasons:
+       *  - We need to reset the iteration order via re-adding the element.
+       *  - We need to delete via the internal API to __KEEP__ the TTL of the existing item.
+       *
+       * Note: The public delete function calls the `evictItems()` function.
+       */
+      // TODO: The below delete drops perf from 9,471,026 ops/sec to 5,468,890 ops/sec.
+      this.store.delete(key);
+      this.store.set(key, valueBag);
+
+      this.mostRecentBag = valueBag;
 
       return valueBag.value;
     }
@@ -120,7 +137,11 @@ export class DSCache<T> {
    * Removes an item from the cache.
    */
   delete(key: string): void {
-    this.store.delete(key);
+    if (this.store.has(key)) {
+      this.store.delete(key);
+      // TODO: remove from TTL array
+    }
+
     this.evictItems();
   }
 
@@ -129,7 +150,7 @@ export class DSCache<T> {
    */
   reset() {
     this.store.clear();
-    this.usageStatistics = [];
+    this.expirationStatistics = [];
   }
 
   /**
@@ -163,37 +184,42 @@ export class DSCache<T> {
    * Evicts all items which has an expired TTL or above the cache size limit.
    */
   private evictItems() {
-    const now = Date.now();
     let expirationExitIndex = 0;
-    let usageExitIndex = 0;
 
     /** The TTL array is iterated until we reach the first item with valid TTL. */
-    this.expirationStatistics.every((item, index) => {
-      expirationExitIndex = index;
-      if (item.expireAt < now) {
-        this.store.delete(item.key);
+    if (this.expirationStatistics.length) {
+      this.expirationStatistics.every((item, index) => {
+        expirationExitIndex = index;
+        if (item.expireAt < Date.now()) {
+          this.store.delete(item.key);
 
-        return true;
+          return true;
+        }
+
+        return false;
+      });
+
+      /** We unshift the arrays with the saved exit indexes. */
+      if (expirationExitIndex - 1 > 0) {
+        this.expirationStatistics.splice(0, expirationExitIndex - 1);
       }
+    }
 
-      return false;
-    });
+    if (this.store.size > this.allowedCacheSize) {
+      const iterator = this.store.entries();
+      let iteratorResult: IteratorResult<[string, CacheItem<T>], any> = iterator.next();
 
-    /** The usage array is iterated until we reach the first item being under allowed cache size. */
-    this.usageStatistics.every((item, index) => {
-      usageExitIndex = index;
+      /**
+       * While there are elements in the map to iterate over and we are above the
+       * max allowed size, we iterate and remove elements. We can do this, because
+       * the spec guarantees that a Map iterates over elements in same order as
+       * they were added.
+       */
+      while (!iteratorResult.done && this.store.size > this.allowedCacheSize) {
+        this.store.delete(iteratorResult.value[0]);
 
-      if (this.store.size > this.allowedCacheSize) {
-        this.store.delete(item.key);
-
-        return true;
+        iteratorResult = iterator.next();
       }
-
-      return false;
-    });
-
-    /** We unshift the arrays with the saved exit indexes. */
-    this.expirationStatistics.splice(0, expirationExitIndex - 1);
-    this.expirationStatistics.splice(0, usageExitIndex - 1);
+    }
   }
 }
